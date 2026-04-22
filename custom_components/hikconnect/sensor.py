@@ -16,6 +16,14 @@ _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(seconds=3)  # TODO make it configurable via UI?
 SCAN_INTERVAL_TIMEOUT = timedelta(seconds=2.8)
 RAISE_ON_ERRORS = False  # TODO make it configurable via UI?
+ISAPI_CALL_STATUS_MAPPING = {
+    "idle": "idle",
+    "ring": "ringing",
+    "ringing": "ringing",
+    "call": "call in progress",
+    "calling": "call in progress",
+    "talk": "call in progress",
+}
 
 
 def _patch_hikconnect_logger():
@@ -58,8 +66,43 @@ class CallStatusSensor(SensorEntity):
         self._device_info = device_info
         self._attr_available = False
 
+    async def _async_get_call_status(self):
+        try:
+            return await self._api.get_call_status(self._device_info["serial"])
+        except (KeyError, json.decoder.JSONDecodeError):
+            _LOGGER.debug(
+                "Default call status parser failed for device '%s', trying alternate payload format.",
+                self._device_info["serial"],
+            )
+            return await self._async_get_call_status_alternate()
+
+    async def _async_get_call_status_alternate(self):
+        serial = self._device_info["serial"]
+        async with self._api.client.get(
+            f"{self._api.BASE_URL}/v3/devconfig/v1/call/{serial}/status"
+        ) as response:
+            response_json = await response.json()
+        data = json.loads(response_json["data"])
+
+        caller_info = data.get("callerInfo") or data.get("CallerInfo") or {}
+        status_raw = data.get("callStatus", caller_info.get("status"))
+        if isinstance(status_raw, str):
+            status = ISAPI_CALL_STATUS_MAPPING.get(status_raw.lower(), "unknown")
+        else:
+            status = self._api.CALL_STATUS_MAPPING.get(status_raw, "unknown")
+
+        info = {}
+        for in_key, out_key in self._api.CALL_INFO_MAPPING.items():
+            if in_key in caller_info:
+                info[out_key] = caller_info[in_key]
+
+        return {
+            "status": status,
+            "info": info,
+        }
+
     async def async_update(self) -> None:
-        get_call_status_coro = self._api.get_call_status(self._device_info["serial"])
+        get_call_status_coro = self._async_get_call_status()
         try:
             res = await asyncio.wait_for(get_call_status_coro, SCAN_INTERVAL_TIMEOUT.seconds)
             self._attr_native_value = res["status"]
