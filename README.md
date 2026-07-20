@@ -17,6 +17,8 @@ Nothing more yet, sorry. :) Visit an [issue tracker] to discuss planned features
 
 ## Alarm Areas
 
+![Alarm Area](img/arm_area.png)
+
 NVR alarm **areas** (groups of cameras) are exposed as Home Assistant `alarm_control_panel` entities.
 
 ### What you get
