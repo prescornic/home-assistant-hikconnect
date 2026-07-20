@@ -80,6 +80,22 @@ action: hikconnect.delete_area
 data:
   device_serial: "FK12345678"
   group_id: 12345678
+
+# List areas (returns data)
+action: hikconnect.list_areas
+data:
+  device_serial: "FK12345678"
+
+# Get area details (returns data)
+action: hikconnect.get_area_details
+data:
+  device_serial: "FK12345678"
+  group_id: 12345678
+
+# List cameras (returns data)
+action: hikconnect.list_cameras
+data:
+  device_serial: "FK12345678"
 ```
 
 > **Area constraints (Hik-Connect API limitation):**

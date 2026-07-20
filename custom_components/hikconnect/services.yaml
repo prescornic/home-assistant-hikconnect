@@ -19,7 +19,8 @@ create_area:
     resource_ids:
       name: Resource IDs
       description: List of camera id strings to include in the area.
-      example: ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+      example:
+        - "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       required: true
       selector:
         object:
@@ -73,7 +74,53 @@ update_area:
     resource_ids:
       name: Resource IDs
       description: Complete list of camera id strings to include in the area.
-      example: ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]
+      example:
+        - "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        - "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
       required: true
       selector:
         object:
+
+list_areas:
+  name: List areas
+  description: List all areas on a device. Returns a list of area objects.
+  fields:
+    device_serial:
+      name: Device Serial
+      description: The serial number of the NVR/device.
+      example: "FK12345678"
+      required: true
+      selector:
+        text:
+
+get_area_details:
+  name: Get area details
+  description: Get the members (cameras) belonging to a specific area.
+  fields:
+    device_serial:
+      name: Device Serial
+      description: The serial number of the NVR/device.
+      example: "FK12345678"
+      required: true
+      selector:
+        text:
+    group_id:
+      name: Group ID
+      description: Numeric ID of the area.
+      example: 12345678
+      required: true
+      selector:
+        number:
+          mode: box
+
+list_cameras:
+  name: List cameras
+  description: List all cameras on a device. Returns a list of camera objects.
+  fields:
+    device_serial:
+      name: Device Serial
+      description: The serial number of the NVR/device.
+      example: "FK12345678"
+      required: true
+      selector:
+        text:
