@@ -33,7 +33,6 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
 )
 
-from . import _switch_defence_mode
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -105,11 +104,11 @@ class HikConnectAlarmArea(CoordinatorEntity, AlarmControlPanelEntity):
 
     def _current_area_info(self) -> dict:
         """Return the latest area dict from coordinator data."""
-        group_id = self._area_info.get("groupId")
+        group_id = self._area_info.get("group_id")
         for device in self.coordinator.data:
             if device["id"] == self._device_info["id"]:
                 for area in device.get("areas", []):
-                    if area.get("groupId") == group_id:
+                    if area.get("group_id") == group_id:
                         return area
         # Fall back to cached value if not found in coordinator
         return self._area_info
@@ -121,11 +120,11 @@ class HikConnectAlarmArea(CoordinatorEntity, AlarmControlPanelEntity):
     @property
     def name(self) -> str:
         area = self._current_area_info()
-        return area.get("groupName", f"Area {area.get('groupId', '?')}")
+        return area.get("group_name", f"Area {area.get('group_id', '?')}")
 
     @property
     def unique_id(self) -> str:
-        group_id = self._area_info.get("groupId", "unknown")
+        group_id = self._area_info.get("group_id", "unknown")
         return f"{DOMAIN}-{self._device_info['id']}-area-{group_id}"
 
     @property
@@ -166,7 +165,8 @@ class HikConnectAlarmArea(CoordinatorEntity, AlarmControlPanelEntity):
             if isinstance(r, dict):
                 # Confirmed field name is "memberId"; keep fallbacks for other firmware variants
                 cam_id = (
-                    r.get("memberId")
+                    r.get("member_id")
+                    or r.get("memberId")
                     or r.get("resourceId")
                     or r.get("cameraId")
                     or r.get("id", "")
@@ -182,8 +182,8 @@ class HikConnectAlarmArea(CoordinatorEntity, AlarmControlPanelEntity):
                 cameras.append({"id": r, "name": camera_name_by_id.get(r, "")})
 
         return {
-            "group_id": area.get("groupId"),
-            "group_name": area.get("groupName"),
+            "group_id": area.get("group_id"),
+            "group_name": area.get("group_name"),
             "mode": area.get("mode"),
             "device_serial": self._device_info.get("serial"),
             "cameras": cameras,
@@ -207,36 +207,30 @@ class HikConnectAlarmArea(CoordinatorEntity, AlarmControlPanelEntity):
 
     async def async_alarm_disarm(self, code=None) -> None:
         """Disarm the alarm area (mode 0)."""
-        group_id = self._current_area_info().get("groupId")
+        group_id = self._current_area_info().get("group_id")
         _LOGGER.info(
             "Disarming area groupId=%s on device '%s'",
             group_id, self._device_info["serial"],
         )
-        await _switch_defence_mode(
-            self._api, self._device_info["serial"], group_id, 0
-        )
+        await self._api.disarm_area(self._device_info["serial"], group_id)
         await self.coordinator.async_request_refresh()
 
     async def async_alarm_arm_away(self, code=None) -> None:
         """Arm the alarm area in 'away' mode (mode 1)."""
-        group_id = self._current_area_info().get("groupId")
+        group_id = self._current_area_info().get("group_id")
         _LOGGER.info(
             "Arming area groupId=%s on device '%s' (away)",
             group_id, self._device_info["serial"],
         )
-        await _switch_defence_mode(
-            self._api, self._device_info["serial"], group_id, 1
-        )
+        await self._api.arm_area(self._device_info["serial"], group_id)
         await self.coordinator.async_request_refresh()
 
     async def async_alarm_arm_home(self, code=None) -> None:
         """Arm the alarm area silently in 'home/stay' mode (mode 2)."""
-        group_id = self._current_area_info().get("groupId")
+        group_id = self._current_area_info().get("group_id")
         _LOGGER.info(
             "Arming area groupId=%s on device '%s' (home/silent)",
             group_id, self._device_info["serial"],
         )
-        await _switch_defence_mode(
-            self._api, self._device_info["serial"], group_id, 2
-        )
+        await self._api.arm_area_silent(self._device_info["serial"], group_id)
         await self.coordinator.async_request_refresh()

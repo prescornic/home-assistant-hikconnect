@@ -78,6 +78,7 @@ data:
 # Delete an area
 action: hikconnect.delete_area
 data:
+  device_serial: "FK12345678"
   group_id: 12345678
 ```
 
