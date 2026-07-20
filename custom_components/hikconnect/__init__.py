@@ -7,7 +7,7 @@ from hikconnect.api import HikConnect
 from hikconnect.exceptions import HikConnectError, LoginError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import device_registry
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 import voluptuous as vol
@@ -67,13 +67,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 device_info.update({"cameras": cameras})
 
                 _LOGGER.info("Getting areas for device: '%s'", device_info["serial"])
-                areas = [area async for area in api.get_areas(device_info["serial"])]
-                # Enrich each area with its member camera list
-                for area in areas:
-                    group_id = area.get("group_id")
-                    if group_id is not None:
-                        members = await api.get_area(device_info["serial"], group_id)
-                        area["resources"] = members
+                try:
+                    areas = [area async for area in api.get_areas(device_info["serial"])]
+                    # Enrich each area with its member camera list
+                    for area in areas:
+                        group_id = area.get("group_id")
+                        if group_id is not None:
+                            members = await api.get_area(device_info["serial"], group_id)
+                            area["resources"] = members
+                except Exception as exc:  # noqa: BLE001
+                    _LOGGER.debug(
+                        "Could not fetch areas for device '%s' (device may not support them): %s",
+                        device_info["serial"], exc
+                    )
+                    areas = []
                 device_info["areas"] = areas
                 if areas:
                     _LOGGER.info(
@@ -164,13 +171,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         resource_ids = call.data["resource_ids"]
         try:
             result = await api.create_area(device_serial, group_name, resource_ids)
-            _LOGGER.warning(
-                "[hikconnect] create_area succeeded: '%s' on device '%s' → %s",
+            _LOGGER.info(
+                "create_area succeeded: '%s' on device '%s' → %s",
                 group_name, device_serial, result,
             )
             await coordinator.async_request_refresh()
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.error("[hikconnect] create_area FAILED: %s", exc)
+        except Exception as exc:
+            raise HomeAssistantError(f"create_area FAILED: {exc}") from exc
 
     async def handle_delete_area(call: ServiceCall) -> None:
         """Service: hikconnect.delete_area — delete an existing NVR area/group."""
@@ -178,10 +185,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         group_id = call.data["group_id"]
         try:
             await api.delete_area(device_serial, group_id)
-            _LOGGER.warning("[hikconnect] delete_area succeeded: groupId=%s", group_id)
+            _LOGGER.info("delete_area succeeded: groupId=%s", group_id)
             await coordinator.async_request_refresh()
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.error("[hikconnect] delete_area FAILED: %s", exc)
+        except Exception as exc:
+            raise HomeAssistantError(f"delete_area FAILED: {exc}") from exc
 
     async def handle_update_area(call: ServiceCall) -> None:
         """
@@ -192,17 +199,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         group_name = call.data["group_name"]
         resource_ids = call.data["resource_ids"]
         try:
-            _LOGGER.warning(
-                "[hikconnect] update_area: updating groupId=%s on device '%s'",
+            _LOGGER.info(
+                "update_area: updating groupId=%s on device '%s'",
                 group_id, device_serial,
             )
             result = await api.update_area(device_serial, group_id, group_name, resource_ids)
-            _LOGGER.warning(
-                "[hikconnect] update_area: updated area '%s' → %s", group_name, result
+            _LOGGER.info(
+                "update_area: updated area '%s' → %s", group_name, result
             )
             await coordinator.async_request_refresh()
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.error("[hikconnect] update_area FAILED: %s", exc)
+        except Exception as exc:
+            raise HomeAssistantError(f"update_area FAILED: {exc}") from exc
 
     async def handle_list_areas(call: ServiceCall) -> dict:
         """Service: hikconnect.list_areas — return a list of areas."""
@@ -210,9 +217,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         try:
             areas = [area async for area in api.get_areas(device_serial)]
             return {"areas": areas}
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.error("[hikconnect] list_areas FAILED: %s", exc)
-            return {"error": str(exc)}
+        except Exception as exc:
+            raise HomeAssistantError(f"list_areas FAILED: {exc}") from exc
 
     async def handle_list_cameras(call: ServiceCall) -> dict:
         """Service: hikconnect.list_cameras — return a list of cameras."""
@@ -220,9 +226,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         try:
             cameras = [camera async for camera in api.get_cameras(device_serial)]
             return {"cameras": cameras}
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.error("[hikconnect] list_cameras FAILED: %s", exc)
-            return {"error": str(exc)}
+        except Exception as exc:
+            raise HomeAssistantError(f"list_cameras FAILED: {exc}") from exc
 
     async def handle_get_area_details(call: ServiceCall) -> dict:
         """Service: hikconnect.get_area_details — return area members."""
@@ -231,9 +236,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         try:
             members = await api.get_area(device_serial, group_id)
             return {"members": members}
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.error("[hikconnect] get_area_details FAILED: %s", exc)
-            return {"error": str(exc)}
+        except Exception as exc:
+            raise HomeAssistantError(f"get_area_details FAILED: {exc}") from exc
 
     hass.services.async_register(
         DOMAIN,
@@ -337,6 +341,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
         hass.services.async_remove(DOMAIN, "create_area")
         hass.services.async_remove(DOMAIN, "delete_area")
         hass.services.async_remove(DOMAIN, "update_area")
+        hass.services.async_remove(DOMAIN, "list_areas")
+        hass.services.async_remove(DOMAIN, "get_area_details")
+        hass.services.async_remove(DOMAIN, "list_cameras")
         data = hass.data.pop(DOMAIN)
         await data["api"].close()
     return unload_ok

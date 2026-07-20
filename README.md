@@ -125,10 +125,7 @@ You can read these in **Developer Tools → States**, or use them in automations
 {{ state_attr('alarm_control_panel.gate', 'cameras') | map(attribute='name') | join(', ') }}
 ```
 
-To find a camera's `resource_id` (needed for `create_area` / `update_area`), check the `cameras` attribute of an existing area entity, or use the CLI:
-```bash
-python3 create_nvr_group_test.py --operation list-cameras --device-serial FK12345678
-```
+To find a camera's `resource_id` (needed for `create_area` / `update_area`), check the `cameras` attribute of an existing area entity, or call the `hikconnect.list_cameras` service from Developer Tools.
 
 ### Configurable scan interval
 

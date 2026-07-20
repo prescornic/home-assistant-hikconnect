@@ -93,7 +93,7 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
             {
                 vol.Required(
                     "scan_interval_minutes", default=current_interval
-                ): vol.All(int, vol.Range(min=5, max=1440)),
+                ): vol.All(int, vol.Range(min=5, max=60)),
             }
         )
         return self.async_show_form(step_id="init", data_schema=options_schema)
