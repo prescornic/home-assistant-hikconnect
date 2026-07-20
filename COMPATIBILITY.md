@@ -29,11 +29,4 @@ This means it works with **NVR/DVR devices** that support camera grouping in the
 | Alarm panels (AX Pro, AX Hub, DS-PWA…) | These use ISAPI SecurityCP subsystems, **not** NVR groups. Use a dedicated alarm panel integration. |
 | NVRs with no areas defined | No `alarm_control_panel` entities will appear — this is expected. Create areas first in the Hik-Connect mobile app or via the `hikconnect.create_area` service. |
 
-### How to check if your device is compatible
-
-Run the CLI script:
-```bash
-python3 create_nvr_group_test.py --operation list --device-serial <YOUR_SERIAL>
-```
-If you see a list of groups (even empty `[]`), your device supports the area API.
 
