@@ -1,6 +1,6 @@
 # Overview
 
-A Home Assistant integration to communicate with Hikvision smart doorbells via Hik-Connect cloud.
+A Home Assistant integration to communicate with Hikvision smart doorbells and NVR via Hik-Connect cloud.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/custom-components/hacs)
 
@@ -56,7 +56,7 @@ target:
 
 ### Area management actions
 
-Three actions are registered under the `hikconnect` domain to create, update, and delete areas:
+Next actions are registered under the `hikconnect` domain to create, update, and delete areas:
 
 ```yaml
 # Create a new area (cameras = resource_ids from entity attributes)
@@ -140,8 +140,9 @@ The poll interval can be changed without restarting Home Assistant:
 
 - Area status is polled on the coordinator schedule (default 30 min). It is **not** updated in real-time.
 - After arm/disarm the integration immediately triggers a refresh, so state should update within seconds.
-- `update_area` changes the `group_id` (delete + recreate). The entity re-appears after the next coordinator refresh.
+- `update_area` changes the `group_id` (delete + recreate). The entity re-appears after the next coordinator refresh. 
 - Not all NVR firmware versions expose the area API. If no area entities appear, your device may not support area management over the Hik-Connect cloud.
+- **Recommendation:** Because of how area creation and updates work (requiring entity recreation and polling refreshes), it is highly recommended to manage your areas in the official Hik-Connect application, unless you specifically need to automate their creation/modification via Home Assistant.
 
 
 
