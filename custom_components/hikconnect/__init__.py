@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 from datetime import timedelta
@@ -28,6 +29,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     api = HikConnect()
     api.BASE_URL = entry.data["base_url"]
 
+    # Workaround for hikconnect <=2.1.1 library bug: the login() method only
+    # updates BASE_URL when the server returns meta.code 1100. However, some
+    # regional accounts (e.g. Moldova) get code 200 WITH a loginArea.apiDomain
+    # pointing to the correct regional endpoint (e.g. apiieu.hik-connect.com).
+    # Without this fix, api.login() leaves BASE_URL as the global endpoint and
+    # all subsequent data calls (get_devices, get_areas, etc.) return 401.
+    #
+    # We apply the regional URL fix by calling api.login() and then checking
+    # if the library updated BASE_URL. If it did, great. If not, we do our own
+    # discovery from the login response and update BASE_URL manually.
+    # The corrected URL is persisted into entry.data for future restarts.
     try:
         await api.login(entry.data["username"], entry.data["password"])
     except LoginError as e:
@@ -35,6 +47,54 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         raise ConfigEntryAuthFailed from e
     except aiohttp.ClientError as e:
         raise ConfigEntryNotReady from e
+
+    if api.BASE_URL == entry.data["base_url"]:
+        # Library did NOT change BASE_URL (no 1100 redirect, but there may still
+        # be a loginArea in the response). Do a lightweight discovery call to find
+        # the correct regional domain, then re-login against it.
+        try:
+            async with aiohttp.ClientSession(
+                headers={
+                    "clientType": "55",
+                    "lang": "en-US",
+                    "featureCode": "deadbeef",
+                }
+            ) as session:
+                pwd_hash = hashlib.md5(
+                    entry.data["password"].encode()
+                ).hexdigest()
+                async with session.post(
+                    f"{api.BASE_URL}/v3/users/login/v2",
+                    data={
+                        "account": entry.data["username"],
+                        "password": pwd_hash,
+                        "featureCode": "deadbeef",
+                    },
+                ) as resp:
+                    body = await resp.json()
+                login_area = (body.get("loginArea") or {})
+                regional_domain = login_area.get("apiDomain")
+                if regional_domain:
+                    regional_url = f"https://{regional_domain}"
+                    if regional_url != api.BASE_URL:
+                        _LOGGER.info(
+                            "Applying regional API endpoint: %s → %s "
+                            "(library bug workaround: loginArea in code-200 login response).",
+                            api.BASE_URL,
+                            regional_url,
+                        )
+                        api.BASE_URL = regional_url
+                        # Re-login against the correct regional endpoint so session
+                        # tokens are issued by and usable with the regional server.
+                        await api.login(
+                            entry.data["username"], entry.data["password"]
+                        )
+                        # Persist corrected URL so next restart starts correctly.
+                        hass.config_entries.async_update_entry(
+                            entry, data={**entry.data, "base_url": regional_url}
+                        )
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning("Regional URL discovery failed (non-fatal): %s", exc)
 
     async def relogin_if_needed():
         needed = api.is_refresh_login_needed()
