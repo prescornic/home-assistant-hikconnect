@@ -3,6 +3,7 @@ import logging
 from datetime import timedelta
 
 import aiohttp
+from aiohttp import ClientResponseError
 from hikconnect.api import HikConnect
 from hikconnect.exceptions import HikConnectError, LoginError
 from homeassistant.config_entries import ConfigEntry
@@ -94,6 +95,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
             return devices
         except (HikConnectError, aiohttp.ClientError) as e:
+            # If the server rejected the session (401), force a full re-login
+            # so the next coordinator tick can authenticate successfully.
+            # is_refresh_login_needed() only checks JWT expiry, so it can miss
+            # server-side session invalidations.
+            if isinstance(e, ClientResponseError) and e.status == 401:
+                _LOGGER.warning(
+                    "Got 401 Unauthorized — session was invalidated by the server. "
+                    "Forcing re-login for next coordinator refresh."
+                )
+                try:
+                    await api.login(
+                        entry.data["username"], entry.data["password"]
+                    )
+                    _LOGGER.info("Re-login after 401 succeeded.")
+                except Exception as login_exc:
+                    _LOGGER.error("Re-login after 401 FAILED: %s", login_exc)
             raise UpdateFailed(e) from e
 
     # Refreshing device info can be relativelly infrequent, but...
