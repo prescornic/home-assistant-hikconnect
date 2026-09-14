@@ -42,6 +42,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         if needed:
             try:
                 await api.refresh_login()
+            except ClientResponseError as e:
+                if e.status == 401:
+                    # Refresh token is also expired — fall back to full login.
+                    _LOGGER.warning(
+                        "refresh_login got 401 (refresh token expired), "
+                        "falling back to full login."
+                    )
+                    try:
+                        await api.login(
+                            entry.data["username"], entry.data["password"]
+                        )
+                    except LoginError as login_e:
+                        raise ConfigEntryAuthFailed from login_e
+                else:
+                    raise
             except LoginError as e:
                 # TODO add config_flow reauthenticate handler
                 raise ConfigEntryAuthFailed from e
@@ -95,22 +110,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
             return devices
         except (HikConnectError, aiohttp.ClientError) as e:
-            # If the server rejected the session (401), force a full re-login
-            # so the next coordinator tick can authenticate successfully.
-            # is_refresh_login_needed() only checks JWT expiry, so it can miss
-            # server-side session invalidations.
             if isinstance(e, ClientResponseError) and e.status == 401:
+                # The server invalidated the session independently of the JWT expiry.
+                # Invalidate our cached expiry so relogin_if_needed() triggers on the
+                # next coordinator tick — do NOT re-login here to avoid hammering the
+                # login endpoint and triggering rate-limiting or CAPTCHA.
                 _LOGGER.warning(
-                    "Got 401 Unauthorized — session was invalidated by the server. "
-                    "Forcing re-login for next coordinator refresh."
+                    "Got 401 Unauthorized — session invalidated by server. "
+                    "Will re-authenticate on next coordinator refresh."
                 )
-                try:
-                    await api.login(
-                        entry.data["username"], entry.data["password"]
-                    )
-                    _LOGGER.info("Re-login after 401 succeeded.")
-                except Exception as login_exc:
-                    _LOGGER.error("Re-login after 401 FAILED: %s", login_exc)
+                api.login_valid_until = None
             raise UpdateFailed(e) from e
 
     # Refreshing device info can be relativelly infrequent, but...
