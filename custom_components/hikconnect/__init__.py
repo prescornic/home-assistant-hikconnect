@@ -118,8 +118,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 else:
                     raise
             except LoginError as e:
-                # TODO add config_flow reauthenticate handler
-                raise ConfigEntryAuthFailed from e
+                # hikconnect==2.1.1 does not raise for a refresh HTTP error;
+                # its response parsing raises LoginError instead. A full login
+                # recovers an expired refresh session without failing this update.
+                _LOGGER.warning(
+                    "refresh_login failed; falling back to a full login: %s", e
+                )
+                try:
+                    await api.login(entry.data["username"], entry.data["password"])
+                except LoginError as login_e:
+                    raise ConfigEntryAuthFailed from login_e
 
     async def _fetch_all_devices() -> list:
         """Inner helper: fetch devices+cameras+areas. Raises ClientResponseError on 401."""
