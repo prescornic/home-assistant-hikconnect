@@ -3,7 +3,6 @@ import logging
 from datetime import timedelta
 
 import aiohttp
-from aiohttp import ClientResponseError
 from hikconnect.api import HikConnect
 from hikconnect.exceptions import HikConnectError, LoginError
 from homeassistant.config_entries import ConfigEntry
@@ -28,17 +27,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     api = HikConnect()
     api.BASE_URL = entry.data["base_url"]
 
-    # Workaround for hikconnect <=2.1.1 library bug: the login() method only
-    # updates BASE_URL when the server returns meta.code 1100. However, some
-    # regional accounts (e.g. Moldova) get code 200 WITH a loginArea.apiDomain
-    # pointing to the correct regional endpoint (e.g. apiieu.hik-connect.com).
-    # Without this fix, api.login() leaves BASE_URL as the global endpoint and
-    # all subsequent data calls (get_devices, get_areas, etc.) return 401.
-    #
-    # We apply the regional URL fix by calling api.login() and then checking
-    # if the library updated BASE_URL. If it did, great. If not, we do our own
-    # discovery from the login response and update BASE_URL manually.
-    # The corrected URL is persisted into entry.data for future restarts.
     try:
         await api.login(entry.data["username"], entry.data["password"])
     except LoginError as e:
@@ -53,107 +41,58 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         if needed:
             try:
                 await api.refresh_login()
-            except ClientResponseError as e:
-                if e.status == 401:
-                    # Refresh token is also expired — fall back to full login.
-                    _LOGGER.warning(
-                        "refresh_login got 401 (refresh token expired), "
-                        "falling back to full login."
-                    )
-                    try:
-                        await api.login(
-                            entry.data["username"], entry.data["password"]
-                        )
-                    except LoginError as login_e:
-                        raise ConfigEntryAuthFailed from login_e
-                else:
-                    raise
             except LoginError as e:
-                # hikconnect==2.1.1 does not raise for a refresh HTTP error;
-                # its response parsing raises LoginError instead. A full login
-                # recovers an expired refresh session without failing this update.
-                _LOGGER.warning(
-                    "refresh_login failed; falling back to a full login: %s", e
-                )
-                try:
-                    await api.login(entry.data["username"], entry.data["password"])
-                except LoginError as login_e:
-                    raise ConfigEntryAuthFailed from login_e
-
-    async def _fetch_all_devices() -> list:
-        """Inner helper: fetch devices+cameras+areas. Raises ClientResponseError on 401."""
-        _LOGGER.info("Getting devices")
-        devices = []
-        it = api.get_devices()
-        while True:
-            try:
-                device = await it.__anext__()
-            except StopAsyncIteration:
-                break
-            except json.JSONDecodeError as e:
-                _LOGGER.warning("Skipping device with malformed data: %s", e)
-                continue
-            devices.append(device)
-
-        for device_info in devices:
-            _LOGGER.info("Getting cameras for device: '%s'", device_info["serial"])
-            cameras = [c async for c in api.get_cameras(device_info["serial"])]
-            device_info.update({"cameras": cameras})
-
-            _LOGGER.info("Getting areas for device: '%s'", device_info["serial"])
-            try:
-                areas = [area async for area in api.get_areas(device_info["serial"])]
-                # Enrich each area with its member camera list
-                for area in areas:
-                    group_id = area.get("group_id")
-                    if group_id is not None:
-                        members = await api.get_area(device_info["serial"], group_id)
-                        area["resources"] = members
-            except Exception as exc:  # noqa: BLE001
-                _LOGGER.debug(
-                    "Could not fetch areas for device '%s' (device may not support them): %s",
-                    device_info["serial"], exc
-                )
-                areas = []
-            device_info["areas"] = areas
-            if areas:
-                _LOGGER.info(
-                    "Found %d area(s) for device '%s'", len(areas), device_info["serial"]
-                )
-            else:
-                _LOGGER.debug(
-                    "No areas found for device '%s' (device may not support area management)",
-                    device_info["serial"],
-                )
-        return devices
+                # TODO add config_flow reauthenticate handler
+                raise ConfigEntryAuthFailed from e
 
     async def async_update():
         try:
             await relogin_if_needed()
-            return await _fetch_all_devices()
-        except ClientResponseError as e:
-            if e.status != 401:
-                raise UpdateFailed(e) from e
+            _LOGGER.info("Getting devices")
+            # Skip devices with malformed payload - see #62.
+            devices = []
+            it = api.get_devices()
+            while True:
+                try:
+                    device = await it.__anext__()
+                except StopAsyncIteration:
+                    break
+                except json.JSONDecodeError as e:
+                    _LOGGER.warning("Skipping device with malformed data: %s", e)
+                    continue
+                devices.append(device)
+            for device_info in devices:
+                _LOGGER.info("Getting cameras for device: '%s'", device_info["serial"])
+                cameras = [c async for c in api.get_cameras(device_info["serial"])]
+                device_info.update({"cameras": cameras})
 
-            # 401: Hik-Connect server invalidated our session (e.g. another client logged in).
-            # Re-login immediately and retry once — this avoids a 30-minute outage.
-            _LOGGER.warning(
-                "Got 401 — session was invalidated externally (another client logged in?). "
-                "Re-logging in and retrying..."
-            )
-            try:
-                await api.login(entry.data["username"], entry.data["password"])
-                _LOGGER.info("Re-login after 401 succeeded, retrying data fetch.")
-                return await _fetch_all_devices()
-            except LoginError as login_exc:
-                _LOGGER.error("Re-login after 401 failed (bad credentials?): %s", login_exc)
-                raise UpdateFailed(login_exc) from login_exc
-            except ClientResponseError as retry_exc:
-                if retry_exc.status == 401:
-                    _LOGGER.error(
-                        "Still getting 401 after re-login — giving up this tick."
+                _LOGGER.info("Getting areas for device: '%s'", device_info["serial"])
+                try:
+                    areas = [area async for area in api.get_areas(device_info["serial"])]
+                    # Enrich each area with its member camera list
+                    for area in areas:
+                        group_id = area.get("group_id")
+                        if group_id is not None:
+                            members = await api.get_area(device_info["serial"], group_id)
+                            area["resources"] = members
+                except Exception as exc:  # noqa: BLE001
+                    _LOGGER.debug(
+                        "Could not fetch areas for device '%s' (device may not support them): %s",
+                        device_info["serial"], exc
                     )
-                raise UpdateFailed(retry_exc) from retry_exc
+                    areas = []
+                device_info["areas"] = areas
+                if areas:
+                    _LOGGER.info(
+                        "Found %d area(s) for device '%s'", len(areas), device_info["serial"]
+                    )
+                else:
+                    _LOGGER.debug(
+                        "No areas found for device '%s' (device may not support area management)",
+                        device_info["serial"],
+                    )
+
+            return devices
         except (HikConnectError, aiohttp.ClientError) as e:
             raise UpdateFailed(e) from e
 
