@@ -17,7 +17,7 @@
 		"hikconnect"
 	],
 	"requirements": [
-		"hikconnect @ git+https://github.com/prescornic/hikconnect.git@311065d50994615af280c38d3da676b102f1f68d"
+		"hikconnect==3.0.1"
 	],
 	"version": "3.1.2"
 }
